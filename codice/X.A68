@@ -1,0 +1,126 @@
+**********AREA DATI**************************************
+
+	ORG	$8000
+	
+MSG	DC.B	1,2,3,1,2,3,1,2,3,1,2,3,1,2,3,1,2,3,1,2,3,1,2,3,1,2,3,1,2,3,4,5  ;messaggio da inviare
+ECO DS.B	32  ;spazio per memorizzare l'eco del messaggio
+DIM	DC.B	32  ;dimensione del messaggio sia da inviare che da ricevere
+COUNTI	DC.B	1  ;contatore caratteri inviati, inizializzato a 1 perchè il primo carattere lo invio nel main
+COUNTR	DC.B	0  ;contatore caratteri ricevuti
+
+
+***********AREA MAIN*********************************	
+
+	ORG	$8200
+	
+PIADA	EQU    	$2004	;indirizzo della PIA porto A dato, usato in input per ricevere l'eco
+PIACA	EQU    	$2005	;indirizzo della PIA porto A stato/controllo
+USARTD	EQU		$2008		;registro dato della USART
+USARTC	EQU		$2009		;registro di controllo della USART
+
+MAIN	JSR    INITPIA	; subroutine che inizializza PIA porto A in input
+
+		JSR    INITUSART	;subroutine che inizializza USART in output
+
+	MOVE.W	SR,D0	;legge il registro di stato
+	ANDI.W	#$D8FF,D0 ;maschera per reg stato (imposta stato utente e abilita tutte le interruzioni)
+	MOVE.W	D0,SR	; copia valore nel registro di stato
+
+	MOVEA.L	#USARTD,A1	;indirizzo registro dato in A1
+	MOVEA.L	#USARTC,A2	;indirizzo registro controllo/stato in A2
+	MOVEA.L	#MSG,A0	;indirizzo area messaggio in A0
+		
+	CLR	D1	;pulisco il registro di appoggio
+	CLR	D2	;pulisco il contatore elementi trasmessi
+	
+CHECKDSR	MOVE.B	(A2),D3  ;Verifica che DSR = 1, inutile per la configurazione con DTR=1 in questo caso
+			ANDI.B		#$80,D3		
+			BEQ		CHECKDSR		
+
+PRIMO	MOVE.B	(A0)+,D1
+		MOVE.B	D1,(A1)		;invio primo carattere sulla seriale
+	
+LOOP	MOVE.B	COUNTR,D4  ; attendo che l'eco venga completamente ricevuto prima di inviare un nuovo messaggio
+		MOVE.B	DIM,D0
+		CMP	D0,D4
+		BNE	LOOP
+		
+NEW	JMP	NEW ; non è previsto l'invio di ulteriori messaggi, quindi mi fermo in un loop
+
+
+INITPIA	MOVE.B	#0,PIACA		;mette 0 nel registro controllo così al prossimo accesso sarà a PIADA
+		MOVE.B	#$00,PIADA		    ;accede a DRA e pone DRA=0 : le linee di A sono linee di input	
+		MOVE.B	#%00100101,PIACA  	;abilito IRQA (ricezione), prossimo accesso a PRA e modalità handshaking (100)	
+		RTS
+
+INITUSART	MOVE.B		#$5D,USARTC	 ;primo accesso registro modo -> trasmissione asincrona, 8 bit di informazione bit di parità dispari e 2 bit di stop
+			MOVE.B		#$23,USARTC	 ; secondo accesso registro controllo, abilita trasmettitore e attiva i segnali di handshaking.
+			RTS
+
+**********************************************************************************************************
+	
+	ORG $8700		 ; interruzione della PIA per leggere il carattere 
+
+INT3	MOVE.L  A1,-(A7)		;salvataggio registri
+		MOVE.L  A0,-(A7)
+		MOVE.L  D0,-(A7)
+
+		MOVEA.L	#PIADA,A1
+		MOVEA.L	#ECO,A0	  ;indirizzo area di salvataggio
+		MOVE.B	COUNTR,D0 ;contatore corrente degli elementi ricevuti
+		MOVE.B 	(A1),(A0,D0)	;acquisisce il carattere e lo trasferisce in memoria
+		ADD.B	#1,D0  ; incremento il contatore dei caratteri ricevuti
+		MOVE.B	D0,COUNTR  ; e lo memorizzo
+
+		MOVE.L  (A7)+,D0		;ripristino registri 
+		MOVE.L  (A7)+,A0
+		MOVE.L  (A7)+,A1
+	
+		RTE
+
+				
+	ORG	$8800		; interruzione della USART per inviare il carattere
+
+INT4	MOVE.L  A1,-(A7)		;salvataggio registri
+		MOVE.L  A0,-(A7)
+		MOVE.L  D0,-(A7)
+		MOVE.L  D1,-(A7)
+
+		MOVEA.L	#USARTD,A1
+		MOVEA.L	#MSG,A0	  ;indirizzo area del messaggio da inviare
+		
+		MOVE.B	COUNTI,D0	;contatore corrente degli elementi inviati
+		MOVE.B	DIM,D1
+		CMP.B	D0,D1			;controlla se devo trasmettere altri caratteri
+		BEQ	FINE
+
+INVIO	ADDA.L	D0,A0   ; mi posiziono all'indirizzo del dato da inviare 
+		MOVE.B	(A0),D1   
+		MOVE.B	D1,(A1)		;trasmette il carattere sulla seriale
+
+		ADD.B	#1,D0
+		MOVE.B	D0,COUNTI	;aggiorna contatore caratteri inviati
+
+FINE	MOVE.L  (A7)+,D1		;ripristino registri 
+		MOVE.L  (A7)+,D0
+		MOVE.L  (A7)+,A0
+		MOVE.L  (A7)+,A1
+	
+		RTE			
+
+
+	END	MAIN
+
+
+
+
+
+
+
+
+
+
+
+
+
+

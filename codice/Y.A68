@@ -1,0 +1,128 @@
+
+**********AREA DATI**************************************
+	
+	ORG	$8000
+	
+MSG	DS.B	32	; spazio per memorizzare il messaggio ricevuto e poi da reinviare
+DIM	DC.B	32	; dimensione del messaggio
+COUNTI		DC.B	1	; contatore dei caratteri inviati, inizializzato a 1 perchè il primo lo invio dal main
+COUNTR		DC.B	0	; contatore dei caratteri ricevuti
+
+
+***********AREA MAIN*********************************	
+	
+	ORG    $8200
+
+PIADB	EQU    $2006	;indirizzo di PIA porto B dato, usato in output 
+PIACB	EQU    $2007	;indirizzo di PIA porto B stato/controllo
+USARTD	EQU		$2008		;registro dato della USART
+USARTC	EQU		$2009		;registro di controllo della USART
+
+
+MAIN	JSR	INITPIA	    ; subroutine che inizializza PIA porto B in output
+		JSR	INITUSART	; subroutine che inizializza la USART in input
+		
+				
+	MOVE.W	SR,D0	;legge il registro di stato
+	ANDI.W	#$D8FF,D0 ;maschera per reg stato (imposta stato utente e abilita tutte le interruzioni)
+	MOVE.W	D0,SR	; copia valore nel registro di stato
+	
+	MOVEA.L	#USARTC,A2	;indirizzo registro controllo/stato
+
+CHECKDSR	MOVE.B	(A2),D3  ;Verifica che DSR = 1, inutile per la configurazione con DTR=1 in questo caso
+			ANDI.B		#$80,D3		
+			BEQ		CHECKDSR		
+
+LOOP	MOVE.B	COUNTR,D4   ;attende che l'intero messaggio venga ricevuto sulla USART prima di inviare l'eco dalla PIA
+		MOVE.B	DIM,D0
+		CMP	D0,D4
+		BNE	LOOP
+		
+	MOVEA.L	#PIACB,A1	;indirizzo registro di controllo CRB
+	MOVEA.L	#PIADB,A2	;indirizzo registro PRB
+	MOVEA.L	#MSG,A0	;indirizzo area messaggio
+
+	
+INVIO1	MOVE.B	(A2),D1            ;lettura fittizia da PRB => serve per azzerare CRB7
+		MOVE.B	(A0),D1		;carattere corrente da trasferire in D1;
+		MOVE.B	D1,(A2)		;dato su bus di PIA porto B
+
+LOOP2  	JMP LOOP2	;ciclo caldo dove il processore attende interrupt
+	
+
+INITPIA		MOVE.B	#0,PIACB		;seleziona il registro direzione di PIA porto B 
+			MOVE.B	#$FF,PIADB	  		;accede a DRB e pone DRB=1 : le linee di B sono linee di output	
+			MOVE.B	#%00100101,PIACB   	abilito IRQB (trasmissione), prossimo accesso a PRB e modalità handshaking (100)	
+			RTS
+	
+	
+INITUSART	MOVE.B	#$5D,USARTC	trasmissione asincrona, 8 bit di informazione
+			MOVE.B	#$36,USARTC	;abilita ricevitore, cancella flags di errore e attiva i segnali di handshaking.
+			RTS
+
+
+*********************************************************************************************************
+
+	ORG $8700		; interruzione della PIA per trasmettere il carattere
+
+INT3	MOVE.L	A1,-(A7)		;salvataggio registri
+		MOVE.L	A0,-(A7)
+		MOVE.L	D0,-(A7)
+		MOVE.L	D1,-(A7)
+		MOVE.L	D2,-(A7)
+
+		MOVEA.L	#PIADB,A1
+		MOVEA.L	#MSG,A0	;indirizzo area del carattere da inviare
+		MOVE.B	DIM,D0	;dimensione del messaggio
+		MOVE.B	COUNTI,D1	;contatore corrente dei caratteri inviati
+
+		CMP.B	D1,D0
+		BEQ	FINE
+	
+INVIO	MOVE.B	(A1),D2            ;lettura fittizia da PRB => serve per azzerare CRB7 dopo il primo carattere
+		MOVE.B	(A0,D1),(A1)	;carattere corrente da trasferire in D2;
+		ADD.B	#1,D1			;aggiorno il contatore degli elementi trasmessi
+		MOVE.B	D1,COUNTI
+
+FINE	MOVE.L  (A7)+,D2		;ripristino registri 
+		MOVE.L  (A7)+,D1
+		MOVE.L  (A7)+,D0	
+		MOVE.L  (A7)+,A0
+		MOVE.L  (A7)+,A1
+	
+		RTE
+
+	
+*********************************************************************************************************
+
+	ORG 	$8800		; interruzione per ricevere caratteri sulla USART
+
+INT4	MOVE.L  A1,-(A7)		;salvataggio registri
+		MOVE.L  A0,-(A7)
+		MOVE.L  D0,-(A7)
+	
+		MOVEA.L	#USARTD,A1
+		MOVEA.L	#MSG,A0	;indirizzo area di salvataggio
+		MOVE.B	COUNTR,D0	;contatore corrente dei caratteri ricevuti
+		
+		MOVE.B 	(A1),(A0,D0)	;riceve un carattere e lo memorizza
+	
+		ADD.B	#1,D0
+		MOVE.B	D0,COUNTR	;aggiorna contatore caratteri ricevuti
+
+		MOVE.L  (A7)+,D0	;ripristino registri 
+		MOVE.L  (A7)+,A0
+		MOVE.L  (A7)+,A1
+	
+		RTE			
+
+
+	END	MAIN
+
+
+
+
+
+
+
+

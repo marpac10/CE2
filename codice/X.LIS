@@ -1,0 +1,115 @@
+00000000                                     1  **********AREA DATI**************************************
+00000000                                     2  
+00008000                                     3  	ORG	$8000
+00008000                                     4  	
+00008000  01 02 03 01 02 03 01 02 03 ...     5  MSG	DC.B	1,2,3,1,2,3,1,2,3,1,2,3,1,2,3,1,2,3,1,2,3,1,2,3,1,2,3,1,2,3,4,5  ;messaggio da inviare
+00008020                                     6  ECO DS.B	32  ;spazio per memorizzare l'eco del messaggio
+00008040  20                                 7  DIM	DC.B	32  ;dimensione del messaggio sia da inviare che da ricevere
+00008041  01                                 8  COUNTI	DC.B	1  ;contatore caratteri inviati, inizializzato a 1 perchè il primo carattere lo invio nel main
+00008042  00                                 9  COUNTR	DC.B	0  ;contatore caratteri ricevuti
+00008043                                    10  
+00008043                                    11  
+00008043                                    12  ***********AREA MAIN*********************************	
+00008043                                    13  
+00008200                                    14  	ORG	$8200
+00008200                                    15  	
+00008200  =00002004                         16  PIADA	EQU    	$2004	;indirizzo della PIA porto A dato, usato in input per ricevere l'eco
+00008200  =00002005                         17  PIACA	EQU    	$2005	;indirizzo della PIA porto A stato/controllo
+00008200  =00002008                         18  USARTD	EQU		$2008		;registro dato della USART
+00008200  =00002009                         19  USARTC	EQU		$2009		;registro di controllo della USART
+00008200                                    20  
+00008200  4EB9 0000824C                     21  MAIN	JSR    INITPIA	; subroutine che inizializza PIA porto A in input
+00008206                                    22  
+00008206  4EB9 00008260                     23  		JSR    INITUSART	;subroutine che inizializza USART in output
+0000820C                                    24  
+0000820C  40C0                              25  	MOVE.W	SR,D0	;legge il registro di stato
+0000820E  0240 D8FF                         26  	ANDI.W	#$D8FF,D0 ;maschera per reg stato (imposta stato utente e abilita tutte le interruzioni)
+00008212  46C0                              27  	MOVE.W	D0,SR	; copia valore nel registro di stato
+00008214                                    28  
+00008214  227C 00002008                     29  	MOVEA.L	#USARTD,A1	;indirizzo registro dato in A1
+0000821A  247C 00002009                     30  	MOVEA.L	#USARTC,A2	;indirizzo registro controllo/stato in A2
+00008220  207C 00008000                     31  	MOVEA.L	#MSG,A0	;indirizzo area messaggio in A0
+00008226                                    32  		
+00008226  4241                              33  	CLR	D1	;pulisco il registro di appoggio
+00008228  4242                              34  	CLR	D2	;pulisco il contatore elementi trasmessi
+0000822A                                    35  	
+0000822A  1612                              36  CHECKDSR	MOVE.B	(A2),D3  ;Verifica che DSR = 1, inutile per la configurazione con DTR=1 in questo caso
+0000822C  0203 0080                         37  			ANDI.B		#$80,D3		
+00008230  67F8                              38  			BEQ		CHECKDSR		
+00008232                                    39  
+00008232  1218                              40  PRIMO	MOVE.B	(A0)+,D1
+00008234  1281                              41  		MOVE.B	D1,(A1)		;invio primo carattere sulla seriale
+00008236                                    42  	
+00008236  1839 00008042                     43  LOOP	MOVE.B	COUNTR,D4  ; attendo che l'eco venga completamente ricevuto prima di inviare un nuovo messaggio
+0000823C  1039 00008040                     44  		MOVE.B	DIM,D0
+00008242  B840                              45  		CMP	D0,D4
+00008244  66F0                              46  		BNE	LOOP
+00008246                                    47  		
+00008246  4EF9 00008246                     48  NEW	JMP	NEW ; non è previsto l'invio di ulteriori messaggi, quindi mi fermo in un loop
+0000824C                                    49  
+0000824C                                    50  
+0000824C  11FC 0000 2005                    51  INITPIA	MOVE.B	#0,PIACA		;mette 0 nel registro controllo così al prossimo accesso sarà a PIADA
+00008252  11FC 0000 2004                    52  		MOVE.B	#$00,PIADA		    ;accede a DRA e pone DRA=0 : le linee di A sono linee di input	
+00008258  11FC 0025 2005                    53  		MOVE.B	#%00100101,PIACA  	;abilito IRQA (ricezione), prossimo accesso a PRA e modalità handshaking (100)	
+0000825E  4E75                              54  		RTS
+00008260                                    55  
+00008260  11FC 005D 2009                    56  INITUSART	MOVE.B		#$5D,USARTC	 ;primo accesso registro modo -> trasmissione asincrona, 8 bit di informazione bit di parità dispari e 2 bit di stop
+00008266  11FC 0023 2009                    57  			MOVE.B		#$23,USARTC	 ; secondo accesso registro controllo, abilita trasmettitore e attiva i segnali di handshaking.
+0000826C  4E75                              58  			RTS
+0000826E                                    59  
+0000826E                                    60  **********************************************************************************************************
+0000826E                                    61  	
+00008700                                    62  	ORG $8700		 ; interruzione della PIA per leggere il carattere 
+00008700                                    63  
+00008700  2F09                              64  INT3	MOVE.L  A1,-(A7)		;salvataggio registri
+00008702  2F08                              65  		MOVE.L  A0,-(A7)
+00008704  2F00                              66  		MOVE.L  D0,-(A7)
+00008706                                    67  
+00008706  227C 00002004                     68  		MOVEA.L	#PIADA,A1
+0000870C  207C 00008020                     69  		MOVEA.L	#ECO,A0	  ;indirizzo area di salvataggio
+00008712  1039 00008042                     70  		MOVE.B	COUNTR,D0 ;contatore corrente degli elementi ricevuti
+00008718  1191 0000                         71  		MOVE.B 	(A1),(A0,D0)	;acquisisce il carattere e lo trasferisce in memoria
+0000871C  5200                              72  		ADD.B	#1,D0  ; incremento il contatore dei caratteri ricevuti
+0000871E  13C0 00008042                     73  		MOVE.B	D0,COUNTR  ; e lo memorizzo
+00008724                                    74  
+00008724  201F                              75  		MOVE.L  (A7)+,D0		;ripristino registri 
+00008726  205F                              76  		MOVE.L  (A7)+,A0
+00008728  225F                              77  		MOVE.L  (A7)+,A1
+0000872A                                    78  	
+0000872A  4E73                              79  		RTE
+0000872C                                    80  
+0000872C                                    81  				
+00008800                                    82  	ORG	$8800		; interruzione della USART per inviare il carattere
+00008800                                    83  
+00008800  2F09                              84  INT4	MOVE.L  A1,-(A7)		;salvataggio registri
+00008802  2F08                              85  		MOVE.L  A0,-(A7)
+00008804  2F00                              86  		MOVE.L  D0,-(A7)
+00008806  2F01                              87  		MOVE.L  D1,-(A7)
+00008808                                    88  
+00008808  227C 00002008                     89  		MOVEA.L	#USARTD,A1
+0000880E  207C 00008000                     90  		MOVEA.L	#MSG,A0	  ;indirizzo area del messaggio da inviare
+00008814                                    91  		
+00008814  1039 00008041                     92  		MOVE.B	COUNTI,D0	;contatore corrente degli elementi inviati
+0000881A  1239 00008040                     93  		MOVE.B	DIM,D1
+00008820  B200                              94  		CMP.B	D0,D1			;controlla se devo trasmettere altri caratteri
+00008822  6700 0010                         95  		BEQ	FINE
+00008826                                    96  
+00008826  D1C0                              97  INVIO	ADDA.L	D0,A0   ; mi posiziono all'indirizzo del dato da inviare 
+00008828  1210                              98  		MOVE.B	(A0),D1   
+0000882A  1281                              99  		MOVE.B	D1,(A1)		;trasmette il carattere sulla seriale
+0000882C                                   100  
+0000882C  5200                             101  		ADD.B	#1,D0
+0000882E  13C0 00008041                    102  		MOVE.B	D0,COUNTI	;aggiorna contatore caratteri inviati
+00008834                                   103  
+00008834  221F                             104  FINE	MOVE.L  (A7)+,D1		;ripristino registri 
+00008836  201F                             105  		MOVE.L  (A7)+,D0
+00008838  205F                             106  		MOVE.L  (A7)+,A0
+0000883A  225F                             107  		MOVE.L  (A7)+,A1
+0000883C                                   108  	
+0000883C  4E73                             109  		RTE			
+0000883E                                   110  
+0000883E                                   111  
+0000883E                                   112  	END	MAIN
+
+No errors detected
+No warnings generated
